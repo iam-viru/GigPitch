@@ -1,8 +1,12 @@
 import os
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
-from dotenv import load_dotenv
+from datetime import timedelta
+from functools import wraps
 
-from database.db import init_db, seed_db
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, make_response
+from dotenv import load_dotenv
+from werkzeug.security import generate_password_hash, check_password_hash
+
+from database.db import init_db, seed_db, get_user_by_email, create_user
 from proposals.proposal_builder import (
     build_proposal, validate_proposal, save_proposal,
     get_proposal, get_all_proposals, get_approved_proposals,
@@ -13,24 +17,101 @@ load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key-change-in-production")
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.environ.get("FLASK_ENV") == "production",
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
+)
 
-DEFAULT_USER_ID = 1
+
+@app.after_request
+def set_no_cache(response):
+    """Prevent browser from caching any HTML page — back button after logout shows nothing."""
+    if "text/html" in response.content_type:
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 
-def get_default_user_id():
-    from database.db import get_db
-    conn = get_db()
-    try:
-        user = conn.execute("SELECT id FROM users LIMIT 1").fetchone()
-        return user["id"] if user else None
-    finally:
-        conn.close()
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if "user_id" not in session:
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+
+        user = get_user_by_email(email)
+        if user and user["password_hash"] and check_password_hash(user["password_hash"], password):
+            session.clear()  # prevent session fixation
+            session["user_id"] = user["id"]
+            return redirect(url_for("index"))
+
+        flash("Invalid email or password.", "danger")
+        return render_template("login.html", email=email)
+
+    return render_template("login.html", email="")
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        title = request.form.get("title", "").strip()
+        rate = request.form.get("rate", "").strip()
+        experience = request.form.get("experience", "").strip()
+        skills = request.form.get("skills", "").strip()
+        upwork_url = request.form.get("upwork_url", "").strip()
+        github_url = request.form.get("github_url", "").strip()
+        signature = request.form.get("signature", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        confirm_password = request.form.get("confirm_password", "")
+
+        if not all([name, title, rate, experience, skills, upwork_url, github_url, email, password]):
+            flash("All fields except signature are required.", "danger")
+            return render_template("register.html", form_data=request.form)
+
+        if password != confirm_password:
+            flash("Passwords do not match.", "danger")
+            return render_template("register.html", form_data=request.form)
+
+        if get_user_by_email(email):
+            flash("An account with that email already exists.", "danger")
+            return render_template("register.html", form_data=request.form)
+
+        user_id = create_user(
+            name, title, rate, experience, skills,
+            upwork_url, github_url, signature, email,
+            generate_password_hash(password),
+        )
+        session.clear()  # prevent session fixation
+        session["user_id"] = user_id
+        return redirect(url_for("index"))
+
+    return render_template("register.html", form_data={})
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
 
 
 @app.route("/")
+@login_required
 def index():
-    user_id = get_default_user_id()
-    proposals = get_all_proposals(user_id) if user_id else []
+    user_id = session["user_id"]
+    proposals = get_all_proposals(user_id)
     status_filter = request.args.get("status", "")
     if status_filter:
         proposals = [p for p in proposals if p["status"] == status_filter]
@@ -38,6 +119,7 @@ def index():
 
 
 @app.route("/generate", methods=["GET", "POST"])
+@login_required
 def generate():
     if request.method == "POST":
         job_title = request.form.get("job_title", "").strip()
@@ -48,10 +130,7 @@ def generate():
             flash("Job title and description are required.", "danger")
             return render_template("generate.html", form_data=request.form)
 
-        user_id = get_default_user_id()
-        if not user_id:
-            flash("No user profile found. Please set up your profile.", "danger")
-            return render_template("generate.html", form_data=request.form)
+        user_id = session["user_id"]
 
         try:
             job_data = {
@@ -81,6 +160,7 @@ def generate():
 
 
 @app.route("/proposal/<int:proposal_id>")
+@login_required
 def view_proposal(proposal_id):
     proposal = get_proposal(proposal_id)
     if not proposal:
@@ -90,6 +170,7 @@ def view_proposal(proposal_id):
 
 
 @app.route("/proposal/<int:proposal_id>/approve", methods=["POST"])
+@login_required
 def approve(proposal_id):
     if update_proposal_status(proposal_id, "approved"):
         flash("Proposal approved and saved to history.", "success")
@@ -99,6 +180,7 @@ def approve(proposal_id):
 
 
 @app.route("/proposal/<int:proposal_id>/status", methods=["POST"])
+@login_required
 def update_status(proposal_id):
     new_status = request.form.get("status", "")
     if update_proposal_status(proposal_id, new_status):
@@ -109,13 +191,15 @@ def update_status(proposal_id):
 
 
 @app.route("/history")
+@login_required
 def history():
-    user_id = get_default_user_id()
-    proposals = get_approved_proposals(user_id) if user_id else []
+    user_id = session["user_id"]
+    proposals = get_approved_proposals(user_id)
     return render_template("history.html", proposals=proposals)
 
 
 @app.route("/proposal/<int:proposal_id>/delete", methods=["POST"])
+@login_required
 def delete(proposal_id):
     delete_proposal(proposal_id)
     flash("Proposal deleted.", "success")
@@ -123,6 +207,7 @@ def delete(proposal_id):
 
 
 @app.route("/api/proposal/<int:proposal_id>")
+@login_required
 def api_proposal(proposal_id):
     proposal = get_proposal(proposal_id)
     if not proposal:

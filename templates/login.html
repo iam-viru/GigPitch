@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Login — GigPitch{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-5 col-lg-4">
+        <div class="card shadow-sm">
+            <div class="card-body p-4">
+                <h4 class="card-title mb-4 text-center">
+                    <i class="bi bi-lightning-charge-fill" style="color: var(--color-brand);"></i> Sign in to GigPitch
+                </h4>
+
+                <form method="post" action="{{ url_for('login') }}">
+                    <div class="mb-3">
+                        <label for="email" class="form-label">Email address</label>
+                        <input
+                            type="email"
+                            class="form-control"
+                            id="email"
+                            name="email"
+                            value="{{ email }}"
+                            required
+                            autofocus
+                        >
+                    </div>
+                    <div class="mb-4">
+                        <label for="password" class="form-label">Password</label>
+                        <input
+                            type="password"
+                            class="form-control"
+                            id="password"
+                            name="password"
+                            required
+                        >
+                    </div>
+                    <button type="submit" class="btn btn-success w-100">Login</button>
+                </form>
+
+                <hr>
+                <p class="text-center mb-0 small">
+                    Don't have an account? <a href="{{ url_for('register') }}">Register</a>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
