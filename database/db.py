@@ -41,6 +41,16 @@ def init_db():
                 FOREIGN KEY (user_id) REFERENCES users(id)
             );
 
+            CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER NOT NULL,
+                otp         TEXT NOT NULL,
+                expires_at  DATETIME NOT NULL,
+                used        INTEGER NOT NULL DEFAULT 0,
+                created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+
             CREATE TABLE IF NOT EXISTS proposals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -158,5 +168,73 @@ def create_user(name, title, rate, experience, skills,
               upwork_url, github_url, signature, email, password_hash))
         conn.commit()
         return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def create_reset_token(user_id, otp, expires_at):
+    conn = get_db()
+    try:
+        cur = conn.execute(
+            "INSERT INTO password_reset_tokens (user_id, otp, expires_at) VALUES (?, ?, ?)",
+            (user_id, otp, expires_at),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def get_valid_reset_token(user_id, otp):
+    conn = get_db()
+    try:
+        return conn.execute(
+            """SELECT * FROM password_reset_tokens
+               WHERE user_id = ? AND otp = ? AND used = 0
+                 AND expires_at > datetime('now')
+               ORDER BY created_at DESC LIMIT 1""",
+            (user_id, otp),
+        ).fetchone()
+    finally:
+        conn.close()
+
+
+def get_any_token_for_user(user_id, otp):
+    """Return the most recent token for user+otp regardless of expiry/used state."""
+    conn = get_db()
+    try:
+        return conn.execute(
+            """SELECT * FROM password_reset_tokens
+               WHERE user_id = ? AND otp = ?
+               ORDER BY created_at DESC LIMIT 1""",
+            (user_id, otp),
+        ).fetchone()
+    finally:
+        conn.close()
+
+
+def mark_token_used(token_id):
+    conn = get_db()
+    try:
+        conn.execute("UPDATE password_reset_tokens SET used = 1 WHERE id = ?", (token_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def cleanup_expired_tokens():
+    conn = get_db()
+    try:
+        conn.execute("DELETE FROM password_reset_tokens WHERE expires_at < datetime('now')")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_user_password(user_id, password_hash):
+    conn = get_db()
+    try:
+        conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
+        conn.commit()
     finally:
         conn.close()
