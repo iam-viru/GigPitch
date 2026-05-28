@@ -1,6 +1,8 @@
 import sqlite3
 from pathlib import Path
 
+from werkzeug.security import generate_password_hash
+
 DB_PATH = Path(__file__).parent.parent / "proposals.db"
 
 
@@ -25,6 +27,8 @@ def init_db():
                 upwork_url TEXT NOT NULL,
                 github_url TEXT NOT NULL,
                 signature TEXT NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -57,6 +61,14 @@ def init_db():
             );
         """)
         conn.commit()
+
+        # Migration: add auth columns to existing databases
+        for col in ("email TEXT", "password_hash TEXT"):
+            try:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {col}")
+                conn.commit()
+            except Exception:
+                pass  # column already exists
     finally:
         conn.close()
 
@@ -64,13 +76,23 @@ def init_db():
 def seed_db():
     conn = get_db()
     try:
-        existing = conn.execute("SELECT id FROM users WHERE name = 'Virender T.'").fetchone()
+        existing = conn.execute("SELECT id, email FROM users WHERE name = 'Virender T.'").fetchone()
         if existing:
+            if not existing["email"]:
+                conn.execute(
+                    "UPDATE users SET email = ?, password_hash = ? WHERE id = ? AND email IS NULL",
+                    (
+                        "hello.viru.thakur@gmail.com",
+                        generate_password_hash("GigPitch123!"),
+                        existing["id"],
+                    ),
+                )
+                conn.commit()
             return existing["id"]
 
         cursor = conn.execute("""
-            INSERT INTO users (name, title, rate, experience, skills, upwork_url, github_url, signature)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO users (name, title, rate, experience, skills, upwork_url, github_url, signature, email, password_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             "Virender T.",
             "Full-Stack Developer | Angular & C#, .NET Core Expert | Scalable Apps",
@@ -79,7 +101,9 @@ def seed_db():
             "Angular 15+, .NET Core, ASP.NET MVC, Web API, C#, SQL Server, Azure, AWS",
             "https://www.upwork.com/freelancers/iamviru?s=1110580755107926016",
             "https://github.com/iam-viru",
-            "𝑉𝑖𝑟𝑒𝑛𝑑𝑒𝑟 𝑇. 𝐹𝑢𝑙𝑙-𝑆𝑡𝑎𝑐𝑘 𝐷𝑒𝑣𝑒𝑙𝑜𝑝𝑒𝑟 | 𝐴𝑛𝑔𝑢𝑙𝑎𝑟 & .𝑁𝐸𝑇 𝑆𝑝𝑒𝑐𝑖𝑎𝑙𝑖𝑠𝑡 | 𝑆𝑐𝑎𝑙𝑎𝑏𝑙𝑒 𝑊𝑒𝑏 & 𝐷𝑒𝑠𝑘𝑡𝑜𝑝 𝐴𝑝𝑝𝑠\nhttps://www.upwork.com/freelancers/iamviru?s=1110580755107926016\nGithub: https://github.com/iam-viru"
+            "𝑉𝑖𝑟𝑒𝑛𝑑𝑒𝑟 𝑇. 𝐹𝑢𝑙𝑙-𝑆𝑡𝑎𝑐𝑘 𝐷𝑒𝑣𝑒𝑙𝑜𝑝𝑒𝑟 | 𝐴𝑛𝑔𝑢𝑙𝑎𝑟 & .𝑁𝐸𝑇 𝑆𝑝𝑒𝑐𝑖𝑎𝑙𝑖𝑠𝑡 | 𝑆𝑐𝑎𝑙𝑎𝑏𝑙𝑒 𝑊𝑒𝑏 & 𝐷𝑒𝑠𝑘𝑡𝑜𝑝 𝐴𝑝𝑝𝑠\nhttps://www.upwork.com/freelancers/iamviru?s=1110580755107926016\nGithub: https://github.com/iam-viru",
+            "hello.viru.thakur@gmail.com",
+            generate_password_hash("GigPitch123!"),
         ))
         user_id = cursor.lastrowid
 
@@ -110,5 +134,29 @@ def seed_db():
 
         conn.commit()
         return user_id
+    finally:
+        conn.close()
+
+
+def get_user_by_email(email):
+    conn = get_db()
+    try:
+        return conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+    finally:
+        conn.close()
+
+
+def create_user(name, title, rate, experience, skills,
+                upwork_url, github_url, signature, email, password_hash):
+    conn = get_db()
+    try:
+        cur = conn.execute("""
+            INSERT INTO users (name, title, rate, experience, skills,
+                               upwork_url, github_url, signature, email, password_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (name, title, rate, experience, skills,
+              upwork_url, github_url, signature, email, password_hash))
+        conn.commit()
+        return cur.lastrowid
     finally:
         conn.close()
