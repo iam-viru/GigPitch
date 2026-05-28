@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+
+{% block title %}Register — GigPitch{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-md-8 col-lg-6">
+        <div class="card shadow-sm">
+            <div class="card-body p-4">
+                <h4 class="card-title mb-1 text-center">
+                    <i class="bi bi-lightning-charge-fill" style="color: var(--color-brand);"></i> Create your GigPitch account
+                </h4>
+                <p class="text-muted text-center small mb-4">Your profile info is used to personalise every proposal.</p>
+
+                <form method="post" action="{{ url_for('register') }}">
+
+                    <h6 class="text-uppercase text-muted small fw-semibold mb-3">Profile</h6>
+
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Full name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="name" name="name"
+                               value="{{ form_data.get('name', '') }}" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="title" class="form-label">Professional title <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="title" name="title"
+                               placeholder="e.g. Full-Stack Developer | Angular & .NET Expert"
+                               value="{{ form_data.get('title', '') }}" required>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="rate" class="form-label">Hourly rate <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="rate" name="rate"
+                                   placeholder="e.g. $15.00/hr"
+                                   value="{{ form_data.get('rate', '') }}" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="experience" class="form-label">Years of experience <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="experience" name="experience"
+                                   placeholder="e.g. 13+ years"
+                                   value="{{ form_data.get('experience', '') }}" required>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="skills" class="form-label">Core skills <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="skills" name="skills"
+                               placeholder="e.g. Angular, .NET Core, SQL Server, Azure"
+                               value="{{ form_data.get('skills', '') }}" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="upwork_url" class="form-label">Upwork profile URL <span class="text-danger">*</span></label>
+                        <input type="url" class="form-control" id="upwork_url" name="upwork_url"
+                               placeholder="https://www.upwork.com/freelancers/..."
+                               value="{{ form_data.get('upwork_url', '') }}" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="github_url" class="form-label">GitHub URL <span class="text-danger">*</span></label>
+                        <input type="url" class="form-control" id="github_url" name="github_url"
+                               placeholder="https://github.com/..."
+                               value="{{ form_data.get('github_url', '') }}" required>
+                    </div>
+
+                    <div class="mb-4">
+                        <label for="signature" class="form-label">Signature block</label>
+                        <textarea class="form-control" id="signature" name="signature" rows="3"
+                                  placeholder="Your closing signature (optional)">{{ form_data.get('signature', '') }}</textarea>
+                    </div>
+
+                    <h6 class="text-uppercase text-muted small fw-semibold mb-3">Account</h6>
+
+                    <div class="mb-3">
+                        <label for="email" class="form-label">Email address <span class="text-danger">*</span></label>
+                        <input type="email" class="form-control" id="email" name="email"
+                               value="{{ form_data.get('email', '') }}" required>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="password" class="form-label">Password <span class="text-danger">*</span></label>
+                            <input type="password" class="form-control" id="password" name="password" required>
+                        </div>
+                        <div class="col-md-6 mb-4">
+                            <label for="confirm_password" class="form-label">Confirm password <span class="text-danger">*</span></label>
+                            <input type="password" class="form-control" id="confirm_password" name="confirm_password" required>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-success w-100">Create account</button>
+                </form>
+
+                <hr>
+                <p class="text-center mb-0 small">
+                    Already have an account? <a href="{{ url_for('login') }}">Login</a>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
