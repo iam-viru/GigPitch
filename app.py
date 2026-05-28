@@ -1,12 +1,18 @@
 import os
-from datetime import timedelta
+import secrets
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, make_response
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
 from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from database.db import init_db, seed_db, get_user_by_email, create_user
+from database.db import (
+    init_db, seed_db, get_user_by_email, create_user,
+    create_reset_token, get_valid_reset_token, get_any_token_for_user,
+    mark_token_used, cleanup_expired_tokens, update_user_password,
+)
+from utils.email import send_otp_email
 from proposals.proposal_builder import (
     build_proposal, validate_proposal, save_proposal,
     get_proposal, get_all_proposals, get_approved_proposals,
@@ -105,6 +111,91 @@ def register():
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
+
+@app.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    if session.get("user_id"):
+        return redirect(url_for("index"))
+
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        cleanup_expired_tokens()
+
+        user = get_user_by_email(email)
+        if user:
+            otp = str(secrets.randbelow(1_000_000)).zfill(6)
+            expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+            create_reset_token(user["id"], otp, expires_at)
+            try:
+                send_otp_email(email, otp)
+            except Exception as e:
+                flash(f"Could not send email: {e}", "danger")
+                return render_template("forgot-password.html")
+
+        session["reset_email"] = email
+        flash("If that email is registered, you'll receive an OTP shortly.", "info")
+        return redirect(url_for("verify_otp"))
+
+    return render_template("forgot-password.html")
+
+
+@app.route("/verify-otp", methods=["GET", "POST"])
+def verify_otp():
+    email = session.get("reset_email")
+    if not email:
+        return redirect(url_for("forgot_password"))
+
+    if request.method == "POST":
+        otp = request.form.get("otp", "").strip()
+        user = get_user_by_email(email)
+
+        if user:
+            token = get_valid_reset_token(user["id"], otp)
+            if token:
+                mark_token_used(token["id"])
+                session["reset_user_id"] = user["id"]
+                session.pop("reset_email", None)
+                return redirect(url_for("reset_password"))
+
+            # Give a specific message for expired vs wrong OTP
+            stale = get_any_token_for_user(user["id"], otp)
+            if stale and stale["used"] == 0:
+                flash("OTP has expired. Please request a new one.", "warning")
+            else:
+                flash("Invalid OTP. Please check the code and try again.", "danger")
+        else:
+            flash("Invalid OTP. Please check the code and try again.", "danger")
+
+        return render_template("verify-otp.html", email=email)
+
+    return render_template("verify-otp.html", email=email)
+
+
+@app.route("/reset-password", methods=["GET", "POST"])
+def reset_password():
+    user_id = session.get("reset_user_id")
+    if not user_id:
+        return redirect(url_for("forgot_password"))
+
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        confirm = request.form.get("confirm_password", "")
+
+        if len(password) < 8:
+            flash("Password must be at least 8 characters.", "danger")
+            return render_template("reset-password.html")
+
+        if password != confirm:
+            flash("Passwords do not match.", "danger")
+            return render_template("reset-password.html")
+
+        update_user_password(user_id, generate_password_hash(password))
+        session.pop("reset_user_id", None)
+        flash("Password updated. Please log in.", "success")
+        return redirect(url_for("login"))
+
+    return render_template("reset-password.html")
 
 
 @app.route("/")
