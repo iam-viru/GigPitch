@@ -31,7 +31,7 @@ PROPOSAL_JSON_SCHEMA = {
     "properties": {
         "opening": {
             "type": "string",
-            "description": "Strong opening paragraph (40-55 words) referencing something specific from the job post"
+            "description": "Strong opening paragraph (40-55 words). Must be confident and direct — state what you can do for them and why this project fits you. NEVER start with 'You mentioned', 'I noticed', 'I saw', or any mirroring phrase. Open with what you bring, not what they said."
         },
         "introduction": {
             "type": "string",
@@ -216,7 +216,16 @@ def build_proposal(user_id: int, job_data: dict) -> dict:
 **Client Questions (if any):**
 {job_data.get('client_questions', 'None')}
 
-Return a structured JSON proposal. Select only the 2-3 past projects most relevant to this specific job. The opening must be 40-55 words and reference something specific from this job post. Use additional_context for any bridging paragraphs between deliverables and the CTA."""
+Return a structured JSON proposal. Select only the 2-3 past projects most relevant to this specific job.
+
+Opening rules (strictly enforced):
+- Must be 40-55 words
+- Must be confident and direct — lead with what you can deliver and why this fits your expertise
+- NEVER start with "You mentioned", "I noticed", "I saw", "I read", or any sentence that mirrors back what the client wrote
+- Good example: "Building a responsive admin dashboard with Angular and .NET Core is exactly what I do. I've delivered..."
+- Bad example: "You mentioned needing an experienced developer for..." or "I noticed you're looking for..."
+
+Use additional_context for any bridging paragraphs between deliverables and the CTA."""
 
     proposal_data = _call_claude(
         [{"role": "user", "content": user_message}],
