@@ -2,19 +2,30 @@
 {% block title %}{{ proposal.job_title }} — GigPitch{% endblock %}
 
 {% block content %}
+
+<!-- Loading overlay for AI operations -->
+<div id="loadingOverlay" class="d-none position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center" style="background:rgba(0,0,0,0.55);z-index:9999;">
+    <div class="bg-white rounded-3 p-4 text-center shadow-lg" style="min-width:260px;">
+        <div class="spinner-border mb-3" style="color:var(--color-brand);" role="status"></div>
+        <div class="fw-semibold fs-6 loading-msg">Working on it…</div>
+        <div class="text-muted small mt-1">This usually takes 10–20 seconds</div>
+    </div>
+</div>
+
+<!-- Header -->
 <div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
     <div>
         <a href="{{ url_for('index') }}" class="text-decoration-none text-muted small">
             <i class="bi bi-arrow-left"></i> Back to Dashboard
         </a>
         <h2 class="mt-1 mb-0">{{ proposal.job_title }}</h2>
-        <span class="badge status-{{ proposal.status }} text-white mt-1">{{ proposal.status }}</span>
+        <span class="badge status-{{ proposal.status }} text-white mt-1">{{ proposal.status|capitalize }}</span>
     </div>
     <div class="d-flex gap-2 flex-wrap align-items-center">
         {% if proposal.status != 'approved' %}
         <form method="POST" action="{{ url_for('approve', proposal_id=proposal.id) }}">
             <button type="submit" class="btn btn-success">
-                <i class="bi bi-check-circle"></i> Approve & Save to History
+                <i class="bi bi-check-circle"></i> Approve &amp; Save to History
             </button>
         </form>
         {% else %}
@@ -22,9 +33,14 @@
             <i class="bi bi-check-circle"></i> Approved
         </span>
         {% endif %}
-        <button class="btn btn-outline-secondary btn-sm copy-btn" onclick="copyProposal()">
+        <button class="btn btn-outline-secondary btn-sm" onclick="copyProposal()" id="copyBtn">
             <i class="bi bi-clipboard"></i> Copy
         </button>
+        <form method="POST" action="{{ url_for('regenerate', proposal_id=proposal.id) }}" class="ai-form d-inline">
+            <button type="submit" class="btn btn-outline-primary btn-sm" data-loading="Regenerating proposal…">
+                <i class="bi bi-arrow-clockwise"></i> Regenerate
+            </button>
+        </form>
         <form method="POST" action="{{ url_for('delete', proposal_id=proposal.id) }}"
               onsubmit="return confirm('Delete this proposal?')">
             <button type="submit" class="btn btn-outline-danger btn-sm">
@@ -35,12 +51,14 @@
 </div>
 
 <div class="row g-4">
-    <!-- Proposal Text -->
+    <!-- Left column -->
     <div class="col-lg-8">
+
+        <!-- Full Proposal -->
         <div class="card shadow-sm">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <span class="fw-semibold"><i class="bi bi-file-text"></i> Full Proposal</span>
-                <button class="btn btn-sm btn-outline-secondary copy-btn" onclick="copyProposal()">
+            <div class="card-header d-flex justify-content-between align-items-center py-2">
+                <span class="fw-semibold"><i class="bi bi-file-text me-1"></i>Full Proposal</span>
+                <button class="btn btn-sm btn-outline-secondary" onclick="copyProposal()" id="copyBtn2">
                     <i class="bi bi-clipboard"></i> Copy to Clipboard
                 </button>
             </div>
@@ -49,16 +67,40 @@
             </div>
         </div>
 
-        <!-- Deliverables breakdown -->
+        <!-- Refine Proposal -->
+        <div class="card shadow-sm mt-3">
+            <div class="card-header py-2">
+                <span class="fw-semibold"><i class="bi bi-pencil-square me-1"></i>Request Changes</span>
+                <span class="text-muted small ms-2">Ask Claude to refine specific parts</span>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('refine', proposal_id=proposal.id) }}" class="ai-form" id="refineForm">
+                    <div class="mb-3">
+                        <textarea
+                            name="change_request"
+                            class="form-control"
+                            rows="3"
+                            placeholder="e.g. Make the opening more confident and specific to their Angular requirements. Shorten the deliverables list. Add more about .NET API experience in the introduction."
+                            required
+                        ></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100" data-loading="Applying your changes…">
+                        <i class="bi bi-magic"></i> Apply Changes
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Deliverables -->
         {% if proposal.deliverables %}
         <div class="card shadow-sm mt-3">
-            <div class="card-header fw-semibold">
-                <i class="bi bi-check2-square"></i> Deliverables
+            <div class="card-header py-2 fw-semibold">
+                <i class="bi bi-check2-square me-1"></i>Deliverables
             </div>
             <ul class="list-group list-group-flush">
                 {% for item in proposal.deliverables %}
-                <li class="list-group-item">
-                    <i class="bi bi-check-circle text-success me-2"></i>{{ item }}
+                <li class="list-group-item py-2">
+                    <i class="bi bi-check-circle-fill text-success me-2"></i>{{ item }}
                 </li>
                 {% endfor %}
             </ul>
@@ -68,90 +110,105 @@
         <!-- Related Projects -->
         {% if proposal.related_projects %}
         <div class="card shadow-sm mt-3">
-            <div class="card-header fw-semibold">
-                <i class="bi bi-briefcase"></i> Related Projects Used
+            <div class="card-header py-2 fw-semibold">
+                <i class="bi bi-briefcase me-1"></i>Related Projects Used
             </div>
-            <div class="card-body">
+            <div class="card-body pb-1">
                 {% for proj in proposal.related_projects %}
                 <div class="mb-3 {% if not loop.last %}border-bottom pb-3{% endif %}">
                     <strong>{{ proj.name }}</strong>
-                    <p class="text-muted small mb-1">{{ proj.summary }}</p>
+                    <p class="text-muted small mb-1 mt-1">{{ proj.summary }}</p>
                     <span class="badge bg-secondary">{{ proj.skills }}</span>
                 </div>
                 {% endfor %}
             </div>
         </div>
         {% endif %}
+
     </div>
 
-    <!-- Sidebar -->
+    <!-- Right sidebar -->
     <div class="col-lg-4">
-        <!-- Status Update -->
+
+        <!-- Status -->
         <div class="card shadow-sm mb-3">
-            <div class="card-header fw-semibold">
-                <i class="bi bi-arrow-repeat"></i> Update Status
+            <div class="card-header py-2 fw-semibold">
+                <i class="bi bi-arrow-repeat me-1"></i>Update Status
             </div>
             <div class="card-body">
                 <form method="POST" action="{{ url_for('update_status', proposal_id=proposal.id) }}">
-                    <div class="mb-2">
-                        <select name="status" class="form-select">
-                            {% for s in ['draft', 'ready', 'submitted', 'archived'] %}
-                            <option value="{{ s }}" {% if proposal.status == s %}selected{% endif %}>
-                                {{ s|capitalize }}
-                            </option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <button type="submit" class="btn btn-primary w-100 btn-sm">
-                        Save Status
-                    </button>
+                    <select name="status" class="form-select form-select-sm mb-2">
+                        {% for s in ['draft', 'ready', 'submitted', 'archived'] %}
+                        <option value="{{ s }}" {% if proposal.status == s %}selected{% endif %}>
+                            {{ s|capitalize }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="btn btn-primary w-100 btn-sm">Save Status</button>
                 </form>
             </div>
         </div>
 
         <!-- Job Details -->
         <div class="card shadow-sm mb-3">
-            <div class="card-header fw-semibold">
-                <i class="bi bi-info-circle"></i> Job Details
+            <div class="card-header py-2 fw-semibold">
+                <i class="bi bi-info-circle me-1"></i>Job Details
             </div>
-            <div class="card-body small text-muted">
-                <p class="mb-1"><strong>Title:</strong> {{ proposal.job_title }}</p>
-                <p class="mb-1"><strong>Created:</strong> {{ proposal.created_at[:16] if proposal.created_at else 'N/A' }}</p>
+            <div class="card-body small">
+                <p class="mb-1 text-muted">Title</p>
+                <p class="mb-3 fw-semibold">{{ proposal.job_title }}</p>
+                <p class="mb-1 text-muted">Created</p>
+                <p class="mb-0">{{ proposal.created_at[:16] if proposal.created_at else 'N/A' }}</p>
                 {% if proposal.client_questions %}
-                <hr>
-                <p class="mb-1"><strong>Client Questions:</strong></p>
-                <p class="mb-0">{{ proposal.client_questions }}</p>
+                <hr class="my-2">
+                <p class="mb-1 text-muted">Client Questions</p>
+                <p class="mb-0" style="white-space:pre-wrap;">{{ proposal.client_questions }}</p>
                 {% endif %}
             </div>
         </div>
 
-        <!-- Opening word count indicator -->
-        <div class="card shadow-sm">
-            <div class="card-header fw-semibold">
-                <i class="bi bi-bar-chart"></i> Opening Stats
+        <!-- Opening word count -->
+        <div class="card shadow-sm mb-3">
+            <div class="card-header py-2 fw-semibold">
+                <i class="bi bi-bar-chart me-1"></i>Opening Stats
             </div>
             <div class="card-body">
                 {% set word_count = proposal.opening.split()|length %}
                 <div class="d-flex justify-content-between mb-1">
-                    <small>Word count</small>
+                    <small class="text-muted">Word count</small>
                     <small class="fw-bold {% if word_count >= 40 and word_count <= 55 %}text-success{% else %}text-danger{% endif %}">
                         {{ word_count }} / 40–55
                     </small>
                 </div>
-                <div class="progress" style="height: 8px;">
+                <div class="progress mb-2" style="height:7px;">
                     {% set pct = [(word_count / 55 * 100), 100]|min %}
                     <div class="progress-bar {% if word_count >= 40 and word_count <= 55 %}bg-success{% else %}bg-danger{% endif %}"
-                         style="width: {{ pct }}%"></div>
+                         style="width:{{ pct }}%;"></div>
                 </div>
                 {% if word_count < 40 %}
-                <small class="text-danger mt-1 d-block">Too short ({{ 40 - word_count }} words needed)</small>
+                <small class="text-danger"><i class="bi bi-exclamation-circle"></i> Too short — needs {{ 40 - word_count }} more words</small>
                 {% elif word_count > 55 %}
-                <small class="text-danger mt-1 d-block">Too long ({{ word_count - 55 }} words over)</small>
+                <small class="text-danger"><i class="bi bi-exclamation-circle"></i> Too long — {{ word_count - 55 }} words over limit</small>
                 {% else %}
-                <small class="text-success mt-1 d-block"><i class="bi bi-check-circle"></i> Perfect length</small>
+                <small class="text-success"><i class="bi bi-check-circle-fill"></i> Perfect length</small>
                 {% endif %}
             </div>
         </div>
+
+        <!-- Quick refine chips -->
+        <div class="card shadow-sm">
+            <div class="card-header py-2 fw-semibold">
+                <i class="bi bi-lightning me-1"></i>Quick Tweaks
+            </div>
+            <div class="card-body d-flex flex-wrap gap-2">
+                <button class="btn btn-outline-secondary btn-sm" onclick="fillRefine('Make the opening more confident and specific')">More confident opening</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="fillRefine('Make the proposal shorter and more concise')">Shorten it</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="fillRefine('Make the CTA stronger and more compelling')">Stronger CTA</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="fillRefine('Add more specific technical details about the approach')">More technical detail</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="fillRefine('Make the tone more friendly and conversational')">Friendlier tone</button>
+            </div>
+        </div>
+
     </div>
 </div>
 {% endblock %}
@@ -161,14 +218,40 @@
 function copyProposal() {
     const text = document.getElementById("proposalText").innerText;
     navigator.clipboard.writeText(text).then(() => {
-        const btns = document.querySelectorAll(".copy-btn");
-        btns.forEach(btn => {
+        ["copyBtn", "copyBtn2"].forEach(id => {
+            const btn = document.getElementById(id);
+            if (!btn) return;
+            const original = btn.innerHTML;
             btn.innerHTML = '<i class="bi bi-check2"></i> Copied!';
+            btn.classList.add("btn-success");
+            btn.classList.remove("btn-outline-secondary");
             setTimeout(() => {
-                btn.innerHTML = '<i class="bi bi-clipboard"></i> Copy' + (btn.closest('.card-header') ? ' to Clipboard' : '');
+                btn.innerHTML = original;
+                btn.classList.remove("btn-success");
+                btn.classList.add("btn-outline-secondary");
             }, 2000);
         });
     });
 }
+
+function fillRefine(text) {
+    const ta = document.querySelector('#refineForm textarea');
+    ta.value = text;
+    ta.focus();
+    ta.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+document.querySelectorAll('.ai-form').forEach(form => {
+    form.addEventListener('submit', function(e) {
+        const btn = this.querySelector('[data-loading]');
+        const msg = btn ? btn.dataset.loading : 'Working on it…';
+        document.querySelector('#loadingOverlay .loading-msg').textContent = msg;
+        document.getElementById('loadingOverlay').classList.remove('d-none');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + msg;
+        }
+    });
+});
 </script>
 {% endblock %}
