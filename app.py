@@ -335,9 +335,9 @@ def api_proposal(proposal_id):
     return jsonify(proposal)
 
 
+init_db()
+seed_db()
+seed_proposals()
+
 if __name__ == "__main__":
-    init_db()
-    user_id = seed_db()
-    seed_proposals()
-    print(f"Database initialized. Default user ID: {user_id}")
     app.run(debug=True, host="0.0.0.0", port=5000)
