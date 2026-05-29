@@ -16,7 +16,8 @@ from utils.email import send_otp_email
 from proposals.proposal_builder import (
     build_proposal, validate_proposal, save_proposal,
     get_proposal, get_all_proposals, get_approved_proposals,
-    update_proposal_status, delete_proposal, seed_proposals
+    update_proposal_status, delete_proposal, seed_proposals,
+    regenerate_proposal, build_refined_proposal, update_proposal_content,
 )
 
 load_dotenv()
@@ -287,6 +288,34 @@ def history():
     user_id = session["user_id"]
     proposals = get_approved_proposals(user_id)
     return render_template("history.html", proposals=proposals)
+
+
+@app.route("/proposal/<int:proposal_id>/regenerate", methods=["POST"])
+@login_required
+def regenerate(proposal_id):
+    try:
+        new_proposal = regenerate_proposal(proposal_id)
+        update_proposal_content(proposal_id, new_proposal)
+        flash("Proposal regenerated with fresh content.", "success")
+    except Exception as e:
+        flash(f"Error regenerating proposal: {str(e)}", "danger")
+    return redirect(url_for("view_proposal", proposal_id=proposal_id))
+
+
+@app.route("/proposal/<int:proposal_id>/refine", methods=["POST"])
+@login_required
+def refine(proposal_id):
+    change_request = request.form.get("change_request", "").strip()
+    if not change_request:
+        flash("Please describe what you'd like to change.", "warning")
+        return redirect(url_for("view_proposal", proposal_id=proposal_id))
+    try:
+        refined = build_refined_proposal(proposal_id, change_request)
+        update_proposal_content(proposal_id, refined)
+        flash("Proposal updated with your requested changes.", "success")
+    except Exception as e:
+        flash(f"Error refining proposal: {str(e)}", "danger")
+    return redirect(url_for("view_proposal", proposal_id=proposal_id))
 
 
 @app.route("/proposal/<int:proposal_id>/delete", methods=["POST"])

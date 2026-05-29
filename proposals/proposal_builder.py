@@ -9,8 +9,25 @@ from database.db import get_db
 
 CLAUDE_MD_PATH = Path(__file__).parent.parent / "claude.md"
 
+
+def _to_bold_sans(text: str) -> str:
+    """Convert ASCII text to mathematical bold sans-serif Unicode for Upwork plain-text formatting."""
+    result = []
+    for ch in text:
+        if 'A' <= ch <= 'Z':
+            result.append(chr(0x1D5D4 + ord(ch) - ord('A')))
+        elif 'a' <= ch <= 'z':
+            result.append(chr(0x1D5EE + ord(ch) - ord('a')))
+        elif '0' <= ch <= '9':
+            result.append(chr(0x1D7EC + ord(ch) - ord('0')))
+        else:
+            result.append(ch)
+    return ''.join(result)
+
+
 PROPOSAL_JSON_SCHEMA = {
     "type": "object",
+    "additionalProperties": False,
     "properties": {
         "opening": {
             "type": "string",
@@ -25,6 +42,10 @@ PROPOSAL_JSON_SCHEMA = {
             "items": {"type": "string"},
             "description": "Bullet list of concrete deliverables tailored to the job requirements"
         },
+        "additional_context": {
+            "type": "string",
+            "description": "Optional 1-2 bridging paragraphs after deliverables — design notes, budget acknowledgement, reliability statement. Empty string if not needed."
+        },
         "client_questions_addressed": {
             "type": "string",
             "description": "Direct answers to any client questions from the job post, or empty string if none"
@@ -37,6 +58,7 @@ PROPOSAL_JSON_SCHEMA = {
             "type": "array",
             "items": {
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
                     "name": {"type": "string"},
                     "summary": {"type": "string"},
@@ -51,7 +73,10 @@ PROPOSAL_JSON_SCHEMA = {
             "description": "Suggestion for a Loom video if the job is high-value/complex, or empty string"
         }
     },
-    "required": ["opening", "introduction", "deliverables", "client_questions_addressed", "cta", "related_projects", "loom_suggestion"]
+    "required": [
+        "opening", "introduction", "deliverables", "additional_context",
+        "client_questions_addressed", "cta", "related_projects", "loom_suggestion"
+    ]
 }
 
 
@@ -71,17 +96,95 @@ def _get_user_context(user_id: int) -> dict:
         projects = conn.execute(
             "SELECT * FROM related_projects WHERE user_id = ?", (user_id,)
         ).fetchall()
-        return {
-            "user": dict(user),
-            "projects": [dict(p) for p in projects]
-        }
+        return {"user": dict(user), "projects": [dict(p) for p in projects]}
     finally:
         conn.close()
 
 
+def _build_full_text(proposal_data: dict, user: dict) -> str:
+    deliverables_lines = "\n".join(f"* {d}" for d in proposal_data["deliverables"])
+
+    related_lines = []
+    for i, proj in enumerate(proposal_data["related_projects"], 1):
+        related_lines.append(f"{i}. {_to_bold_sans(proj['name'])}")
+        related_lines.append(proj["summary"])
+        related_lines.append(f"{_to_bold_sans('Relevant Skills')}: {proj['skills']}")
+        if i < len(proposal_data["related_projects"]):
+            related_lines.append("")
+
+    parts = [
+        "Hi,",
+        "",
+        proposal_data["opening"],
+        "",
+        proposal_data["introduction"],
+        "",
+        "For your project, I can deliver:",
+        "",
+        deliverables_lines,
+        "",
+    ]
+
+    if proposal_data.get("additional_context", "").strip():
+        parts.extend([proposal_data["additional_context"], ""])
+
+    if proposal_data.get("client_questions_addressed", "").strip():
+        parts.extend([proposal_data["client_questions_addressed"], ""])
+
+    parts.extend([
+        proposal_data["cta"],
+        "",
+        user["signature"],
+        "",
+        "==================",
+        _to_bold_sans("RELATED PROJECTS"),
+        "==================",
+    ])
+    parts.extend(related_lines)
+
+    return "\n".join(parts)
+
+
+def _assemble_proposal_dict(user_id: int, job_title: str, job_description: str,
+                             client_questions: str, proposal_data: dict, user: dict) -> dict:
+    return {
+        "user_id": user_id,
+        "job_title": job_title,
+        "job_description": job_description,
+        "client_questions": client_questions,
+        "opening": proposal_data["opening"],
+        "introduction": proposal_data["introduction"],
+        "deliverables": json.dumps(proposal_data["deliverables"]),
+        "related_projects": json.dumps(proposal_data["related_projects"]),
+        "cta": proposal_data["cta"],
+        "client_questions_addressed": proposal_data.get("client_questions_addressed", ""),
+        "loom_url": proposal_data.get("loom_suggestion", ""),
+        "full_text": _build_full_text(proposal_data, user),
+        "status": "draft"
+    }
+
+
+def _call_claude(messages: list, system_prompt: str = "") -> dict:
+    client = anthropic.Anthropic()
+    kwargs = {
+        "model": "claude-sonnet-4-6",
+        "max_tokens": 4096,
+        "messages": messages,
+        "output_config": {
+            "format": {
+                "type": "json_schema",
+                "schema": PROPOSAL_JSON_SCHEMA
+            }
+        }
+    }
+    if system_prompt:
+        kwargs["system"] = system_prompt
+    response = client.messages.create(**kwargs)
+    return json.loads(response.content[-1].text)
+
+
 def build_proposal(user_id: int, job_data: dict) -> dict:
     system_prompt = CLAUDE_MD_PATH.read_text(encoding="utf-8")
-
     context = _get_user_context(user_id)
     user = context["user"]
     projects = context["projects"]
@@ -113,66 +216,108 @@ def build_proposal(user_id: int, job_data: dict) -> dict:
 **Client Questions (if any):**
 {job_data.get('client_questions', 'None')}
 
-Return a structured JSON proposal following the schema. Select only the 2-3 past projects most relevant to this specific job. The opening must be 40-55 words and reference something specific from this job post."""
+Return a structured JSON proposal. Select only the 2-3 past projects most relevant to this specific job. The opening must be 40-55 words and reference something specific from this job post. Use additional_context for any bridging paragraphs between deliverables and the CTA."""
 
-    client = anthropic.Anthropic()
-
-    response = client.messages.create(
-        model="claude-opus-4-7",
-        max_tokens=4096,
-        thinking={"type": "adaptive"},
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_message}],
-        output_config={
-            "format": {
-                "type": "json_schema",
-                "name": "proposal",
-                "schema": PROPOSAL_JSON_SCHEMA
-            }
-        }
+    proposal_data = _call_claude(
+        [{"role": "user", "content": user_message}],
+        system_prompt=system_prompt,
     )
 
-    proposal_data = json.loads(response.content[-1].text)
+    return _assemble_proposal_dict(
+        user_id=user_id,
+        job_title=job_data.get("title", ""),
+        job_description=job_data.get("description", ""),
+        client_questions=job_data.get("client_questions", ""),
+        proposal_data=proposal_data,
+        user=user,
+    )
 
-    deliverables_text = "\n".join(f"- {d}" for d in proposal_data["deliverables"])
-    related_text = "\n".join([
-        f"**{p['name']}**\n{p['summary']}\nRelevant Skills: {p['skills']}"
-        for p in proposal_data["related_projects"]
-    ])
 
-    sections = [
-        proposal_data["opening"],
-        "",
-        proposal_data["introduction"],
-        "",
-        "For your project, I can deliver:",
-        deliverables_text,
-    ]
+def regenerate_proposal(proposal_id: int) -> dict:
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT * FROM proposals WHERE id = ?", (proposal_id,)).fetchone()
+        if not row:
+            raise ValueError(f"Proposal {proposal_id} not found")
+        existing = dict(row)
+    finally:
+        conn.close()
 
-    if proposal_data.get("client_questions_addressed"):
-        sections += ["", proposal_data["client_questions_addressed"]]
-
-    sections += ["", proposal_data["cta"], "", "**Related Projects:**", related_text, "", user["signature"]]
-
-    if proposal_data.get("loom_suggestion"):
-        sections.insert(-1, f"\n💡 {proposal_data['loom_suggestion']}")
-
-    full_text = "\n".join(sections)
-
-    return {
-        "user_id": user_id,
-        "job_title": job_data.get("title", ""),
-        "job_description": job_data.get("description", ""),
-        "client_questions": job_data.get("client_questions", ""),
-        "opening": proposal_data["opening"],
-        "introduction": proposal_data["introduction"],
-        "deliverables": json.dumps(proposal_data["deliverables"]),
-        "related_projects": json.dumps(proposal_data["related_projects"]),
-        "cta": proposal_data["cta"],
-        "loom_url": proposal_data.get("loom_suggestion", ""),
-        "full_text": full_text,
-        "status": "draft"
+    job_data = {
+        "title": existing["job_title"],
+        "description": existing["job_description"],
+        "client_questions": existing.get("client_questions", ""),
     }
+    return build_proposal(existing["user_id"], job_data)
+
+
+def build_refined_proposal(proposal_id: int, change_request: str) -> dict:
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT * FROM proposals WHERE id = ?", (proposal_id,)).fetchone()
+        if not row:
+            raise ValueError(f"Proposal {proposal_id} not found")
+        existing = dict(row)
+    finally:
+        conn.close()
+
+    system_prompt = CLAUDE_MD_PATH.read_text(encoding="utf-8")
+    context = _get_user_context(existing["user_id"])
+    user = context["user"]
+
+    user_message = f"""You previously generated this Upwork cover letter proposal:
+
+---
+{existing["full_text"]}
+---
+
+The user wants these specific changes applied:
+{change_request}
+
+Apply only the requested changes and return the complete updated proposal in JSON format. Keep all sections that weren't mentioned in the change request exactly as they are."""
+
+    proposal_data = _call_claude(
+        [{"role": "user", "content": user_message}],
+        system_prompt=system_prompt,
+    )
+
+    return _assemble_proposal_dict(
+        user_id=existing["user_id"],
+        job_title=existing["job_title"],
+        job_description=existing["job_description"],
+        client_questions=existing.get("client_questions", ""),
+        proposal_data=proposal_data,
+        user=user,
+    )
+
+
+def update_proposal_content(proposal_id: int, proposal: dict) -> None:
+    conn = get_db()
+    try:
+        conn.execute("""
+            UPDATE proposals SET
+                opening = ?,
+                introduction = ?,
+                deliverables = ?,
+                related_projects = ?,
+                cta = ?,
+                loom_url = ?,
+                full_text = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (
+            proposal.get("opening", ""),
+            proposal.get("introduction", ""),
+            proposal.get("deliverables", "[]"),
+            proposal.get("related_projects", "[]"),
+            proposal.get("cta", ""),
+            proposal.get("loom_url", ""),
+            proposal.get("full_text", ""),
+            proposal_id,
+        ))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def validate_proposal(proposal: dict) -> ValidationResult:
@@ -182,9 +327,9 @@ def validate_proposal(proposal: dict) -> ValidationResult:
     opening = proposal.get("opening", "")
     word_count = len(opening.split())
     if word_count < 40:
-        errors.append(f"Opening is too short (minimum 40 words)")
+        errors.append("Opening is too short (minimum 40 words)")
     elif word_count > 55:
-        errors.append(f"Opening is too long (maximum 55 words)")
+        errors.append("Opening is too long (maximum 55 words)")
 
     if not proposal.get("cta", "").strip():
         errors.append("Call to action is required")
@@ -196,19 +341,15 @@ def validate_proposal(proposal: dict) -> ValidationResult:
             warnings.append("Client questions detected but not addressed")
 
     loom_url = proposal.get("loom_url", "")
-    if loom_url and loom_url.strip():
-        if "loom.com" not in loom_url and not loom_url.startswith("http"):
+    if loom_url and loom_url.strip() and loom_url.startswith("http"):
+        if "loom.com" not in loom_url:
             warnings.append("Loom URL appears invalid")
 
     for required in ["opening", "introduction", "deliverables", "cta"]:
         if not proposal.get(required):
             errors.append(f"Missing required field: {required}")
 
-    return ValidationResult(
-        is_valid=len(errors) == 0,
-        errors=errors,
-        warnings=warnings
-    )
+    return ValidationResult(is_valid=len(errors) == 0, errors=errors, warnings=warnings)
 
 
 def save_proposal(user_id: int, proposal: dict) -> int:
