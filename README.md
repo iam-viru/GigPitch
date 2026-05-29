@@ -67,7 +67,7 @@ python app.py
 App starts at `http://localhost:5000`. The database is created automatically on first run and seeded with a default user.
 
 **Default credentials:**
-- Email: `hello.viru.thakur@gmail.com`
+- Email: `XXX.XXX@gmail.com`
 - Password: `GigPitch123!`
 
 ---
